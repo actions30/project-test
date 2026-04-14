@@ -1,0 +1,125 @@
+name: 2. UnitTests
+
+on:
+  workflow_run:
+    workflows: ["GitRepo_OnPortal_Client_2_FrontDesk_Compile"]
+    types:
+      - completed
+    branches:
+      - '**'
+
+env:
+  PROJECT_CHECKOUTDIR: 'C:\TeamCity\UnitTests\FrontDesk'
+  TEAMCITY_PROJECT_NAME: FrontDesk
+  BRANCH_NAME: ${{ github.event.workflow_run.head_branch }}
+  BRANCH_PATH: ${{ github.event.workflow_run.head_branch }}
+  BuildVersion: ${{ github.run_number }}
+
+jobs:
+  unit-tests:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: [self-hosted, SLEDEVGENBLD123]
+
+    steps:
+      # Checkout only build folder from HoneywellGitBuild repo
+      - name: Checkout HoneywellGitBuild (build folder only)
+        uses: actions/checkout@v4
+        with:
+          repository: <YOUR_ORG>/HoneywellGitBuild   # replace with actual repo
+          path: build
+          sparse-checkout: |
+            build
+          sparse-checkout-cone-mode: false
+
+      # Checkout client and server folders from GitRepo
+      - name: Checkout GitRepo (client + server folders)
+        uses: actions/checkout@v4
+        with:
+          repository: <YOUR_ORG>/GitRepo              # replace with actual repo
+          path: repo
+          sparse-checkout: |
+            client
+            server
+          sparse-checkout-cone-mode: false
+
+      # Checkout shared folder from GitShared repo
+      - name: Checkout GitShared (shared folder only)
+        uses: actions/checkout@v4
+        with:
+          repository: <YOUR_ORG>/GitShared            # replace with actual repo
+          path: shared-repo
+          sparse-checkout: |
+            shared
+          sparse-checkout-cone-mode: false
+
+      # Replicate checkout layout to match TeamCity structure
+      - name: Arrange checkout directories
+        shell: cmd
+        run: |
+          xcopy /E /I /Y repo\client ${{ env.PROJECT_CHECKOUTDIR }}\client\
+          xcopy /E /I /Y repo\server ${{ env.PROJECT_CHECKOUTDIR }}\server\
+          xcopy /E /I /Y shared-repo\shared ${{ env.PROJECT_CHECKOUTDIR }}\shared\
+          xcopy /E /I /Y build\build ${{ env.PROJECT_CHECKOUTDIR }}\build\
+
+      # Step: NuGet restore
+      - name: Nuget
+        shell: cmd
+        run: |
+          D:\bin\nuget\nuget.exe restore ^
+            ${{ env.PROJECT_CHECKOUTDIR }}\client\${{ env.TEAMCITY_PROJECT_NAME }}\${{ env.TEAMCITY_PROJECT_NAME }}.sln
+
+      # Step: msbuild 2022 (active build step)
+      - name: msbuild 2022
+        shell: cmd
+        run: |
+          cd /d C:\
+          cd "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin"
+          MSBuild.exe ${{ env.PROJECT_CHECKOUTDIR }}\client/${{ env.TEAMCITY_PROJECT_NAME }}/${{ env.TEAMCITY_PROJECT_NAME }}.sln
+
+      # Step: dotnet test without database
+      - name: dotnet test without database
+        shell: cmd
+        run: |
+          dotnet test ^
+            ${{ env.PROJECT_CHECKOUTDIR }}\client\FrontDesk\Tests\UnitTests_NoDB\bin\Debug\net6.0-windows\UnitTests_NoDB.dll ^
+            --verbosity detailed
+
+      # Step: dotnet test Front Desk system tests
+      - name: dotnet test Front Desk system tests
+        shell: cmd
+        run: |
+          dotnet test ^
+            ${{ env.PROJECT_CHECKOUTDIR }}\client\FrontDesk\Tests\FrontDeskClientTests\bin\Debug\net6.0-windows\FrontDeskSystemTests.dll ^
+            --verbosity detailed
+
+      # Step: dotnet test FrontDesk Unit tests
+      - name: dotnet test FrontDesk Unit tests
+        shell: cmd
+        run: |
+          dotnet test ^
+            ${{ env.PROJECT_CHECKOUTDIR }}\client\FrontDesk\Tests\FrontDeskTests\bin\Debug\net6.0-windows\FrontDeskUnitTests.dll ^
+            --verbosity detailed
+
+      # Step: dot net test for MtsApiSvcTests (runs even on failure)
+      - name: dot net test for MtsApiSvcTests
+        if: always()
+        shell: cmd
+        run: |
+          dotnet test ^
+            ${{ env.PROJECT_CHECKOUTDIR }}\client\FrontDesk\Tests\MtsApiSvcTests\bin\Debug\net6.0\MtsApiSvcTests.dll
+
+      # Step: dot net test for OPLUnitTests (runs even on failure)
+      - name: dot net test for OPLUnitTests
+        if: always()
+        shell: cmd
+        run: |
+          dotnet test ^
+            ${{ env.PROJECT_CHECKOUTDIR }}\client\FrontDesk\Tests\OPLUnitTests\bin\Debug\net6.0-windows\OPLUnitTests.dll
+
+      # Step: dot net test for MTSMQTests (runs even on failure)
+      - name: dot net test for MTSMQTests
+        if: always()
+        shell: cmd
+        run: |
+          dotnet test ^
+            ${{ env.PROJECT_CHECKOUTDIR }}\client\FrontDesk\Tests\MTSMQTests\bin\Debug\net6.0\MTSMQTests.dll
